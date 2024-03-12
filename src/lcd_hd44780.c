@@ -32,9 +32,6 @@ nsecs_to_ticks(uint32_t ns)
 static inline void
 ndelay(uint32_t nsecs)
 {
-    if (CONFIG_MACH_AVR)
-        // Slower MCUs don't require a delay
-        return;
     uint32_t end = timer_read_time() + nsecs_to_ticks(nsecs);
     while (timer_is_before(timer_read_time(), end))
         irq_poll();
@@ -45,7 +42,6 @@ static __always_inline void
 hd44780_xmit_bits(uint8_t toggle, struct gpio_out e, struct gpio_out d4
                   , struct gpio_out d5, struct gpio_out d6, struct gpio_out d7)
 {
-    gpio_out_toggle(e);
     if (toggle & 0x10)
         gpio_out_toggle(d4);
     if (toggle & 0x20)
@@ -54,7 +50,9 @@ hd44780_xmit_bits(uint8_t toggle, struct gpio_out e, struct gpio_out d4
         gpio_out_toggle(d6);
     if (toggle & 0x80)
         gpio_out_toggle(d7);
-    ndelay(230);
+    
+    gpio_out_toggle(e);
+    ndelay(450);
     gpio_out_toggle(e);
 }
 
@@ -65,8 +63,8 @@ hd44780_xmit_byte(struct hd44780 *h, uint8_t data)
     struct gpio_out e = h->e, d4 = h->d4, d5 = h->d5, d6 = h->d6, d7 = h->d7;
     hd44780_xmit_bits(h->last ^ data, e, d4, d5, d6, d7);
     h->last = data << 4;
-    ndelay(500 - 230);
-    hd44780_xmit_bits(data ^ h->last, e, d4, d5, d6, d7);
+    ndelay(1000-450);
+    hd44780_xmit_bits(data ^ h->last, e, d4, d5, d6, d7); 
 }
 
 // Transmit a series of bytes to the chip
@@ -99,21 +97,7 @@ command_config_hd44780(uint32_t *args)
     h->d5 = gpio_out_setup(args[4], 0);
     h->d6 = gpio_out_setup(args[5], 0);
     h->d7 = gpio_out_setup(args[6], 0);
-
-    if (!CONFIG_HAVE_STRICT_TIMING) {
-        h->cmd_wait_ticks = args[7];
-        return;
-    }
-
-    // Calibrate cmd_wait_ticks
-    irq_disable();
-    uint32_t start = timer_read_time();
-    hd44780_xmit_byte(h, 0);
-    uint32_t end = timer_read_time();
-    irq_enable();
-    uint32_t diff = end - start, delay_ticks = args[7];
-    if (delay_ticks > diff)
-        h->cmd_wait_ticks = delay_ticks - diff;
+    h->cmd_wait_ticks = args[7];
 }
 DECL_COMMAND(command_config_hd44780,
              "config_hd44780 oid=%c rs_pin=%u e_pin=%u"
